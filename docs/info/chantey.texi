@@ -1,0 +1,330 @@
+\input texinfo   @c -*-texinfo-*-
+@c %**start of header
+@setfilename chantey.info
+@settitle chantey 0.1.0
+@documentencoding UTF-8
+@c %**end of header
+
+@dircategory Audio
+@direntry
+* chantey: (chantey).           Sheet music to sound, notation, and comparisons.
+@end direntry
+
+@copying
+This manual documents chantey version 0.1.0, a command-line pipeline that
+turns written sheet music into audio, notation, measure-level diffs, and
+side-by-side comparison pages.
+@end copying
+
+@titlepage
+@title chantey
+@subtitle Sheet music @arrow{} sound & views
+@subtitle Version 0.1.0
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top chantey
+
+Chanteys kept a ship's crew working in unison while making the work
+lighter. So does this one: human and AI work from one canonical score, and
+``change the chord in measures 12--16'' comes back as new sound, new
+notation, and a page showing exactly what changed.
+@end ifnottex
+
+@menu
+* The Idea::            The PDF is a rendering, not the source.
+* Setup::               External engines and how to install them.
+* The Workflow::        Ingest, edit, diff, render, compare.
+* Commands::            The five commands in detail.
+* Editing Scores::      Why editing is a script, with a worked example.
+* OMR and Proofing::    Starting from PDF, honestly.
+* The Two Voices::      Piano vs. synth, and the guarantees.
+* Licensed Material::   The rules that keep you safe.
+* Reference::           Environment, exit codes, file naming.
+@end menu
+
+@node The Idea
+@chapter The Idea
+
+Sheet-music PDFs are pictures. Editing pictures of music is a dead end, and
+comparing two of them tells you nothing about @emph{what} changed. chantey
+is built on one architectural decision:
+
+@quotation
+@strong{The PDF is a rendering, not the source.} One canonical MusicXML
+file per piece is the single source of truth; audio and notation are both
+derived from it.
+@end quotation
+
+Everything follows from that. An edit is a change to the canonical file,
+so every artifact regenerates consistently. A diff is meaningful, because
+two versions of the same piece differ in identifiable measures. And the
+comparison page can highlight exactly those measures, because the tool ---
+not a human --- computed them.
+
+chantey supplies the pipeline: ingest, inspection, rendering, diffing, and
+the comparison page. The musical @emph{judgment} --- what to change ---
+stays with people and the scripts they request (@pxref{Editing Scores}).
+
+@node Setup
+@chapter Setup
+
+chantey wraps existing engines. Each is checked when needed, with an
+actionable error if missing:
+
+@table @strong
+@item MuseScore + FluidSynth (apt)
+@example
+sudo apt install musescore3 fluidsynth fluid-soundfont-gm
+@end example
+PDF engraving and the piano voice.
+
+@item Audiveris (flatpak) --- only for PDF ingest
+@example
+flatpak remote-add --user --if-not-exists flathub \
+    https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install -y --user flathub org.audiveris.audiveris
+@end example
+Optical music recognition. Skip it if your scores exist as MusicXML.
+
+@item hornpipe --- the deterministic synth voice
+@example
+uv tool install git+https://github.com/mr-kelley/hornpipe
+@end example
+@end table
+
+chantey itself carries heavy Python dependencies (music21, Verovio) in its
+own environment; install it the same way (@code{uv tool install
+git+https://github.com/mr-kelley/chantey}) or run it from a clone with
+@code{uv run chantey}.
+
+@node The Workflow
+@chapter The Workflow
+
+@example
+chantey ingest tune.mxl              # -> tune.musicxml (canonical)
+chantey info tune.musicxml           # the structural map
+#   ... apply the requested edit as a music21 script,
+#       writing revised.musicxml ...
+chantey diff tune.musicxml revised.musicxml
+chantey render tune.musicxml
+chantey render revised.musicxml
+chantey compare tune.musicxml revised.musicxml
+@end example
+
+Open @file{compare.html} in a browser: both versions engraved side by
+side, @strong{every measure numbered} (long pieces need cheap references),
+the changed measures highlighted in crimson in both columns, and players
+for all four audio renders.
+
+Two habits pay off. Run @command{info} first, always --- it is both the
+``did ingest work'' check and the reference map when phrasing an edit
+request. And run @command{diff} after every edit, @emph{before} rendering
+--- it confirms the edit touched exactly what was intended.
+
+@node Commands
+@chapter Commands
+
+@section info
+
+@example
+chantey info @var{score}
+@end example
+
+Title and composer, parts with measure counts, key and time signatures
+with their change points, tempo marks, note count, repeat barlines and
+voltas.
+
+@section ingest
+
+@example
+chantey ingest @var{file} [-o @var{out.musicxml}] [--force]
+@end example
+
+Produces the canonical MusicXML. @file{.mxl}/@file{.musicxml} input is
+normalized as-is --- @emph{always prefer this path when it exists}:
+lossless, nothing to proof. @file{.pdf} input goes through Audiveris OMR
+(headless; chantey handles the flatpak sandbox plumbing) and prints the
+proofing reminder (@pxref{OMR and Proofing}). Metadata is carried through;
+a missing title is backfilled from the filename.
+
+@section render
+
+@example
+chantey render @var{score} [--voice piano|synth|both] [--no-pdf]
+               [-o @var{dir}] [--force]
+@end example
+
+Writes, beside the score or in @var{dir}: @file{@var{stem}.piano.wav},
+@file{@var{stem}.synth.toml} + @file{@var{stem}.synth.wav}, and
+@file{@var{stem}.pdf}. @xref{The Two Voices}, for what the voices are and
+the guarantees they share.
+
+@section diff
+
+@example
+chantey diff @var{original} @var{revised} [-v]
+@end example
+
+Measure-by-measure comparison of note content (pitches, positions,
+durations), per part. Prints the changed-measure list; @option{-v} adds
+per-part detail; identical scores are reported as such (exit 0 either
+way).
+
+@section compare
+
+@example
+chantey compare @var{original} @var{revised} [-o @var{out.html}] [--force]
+@end example
+
+One self-contained local HTML file. Changed measures come from
+@command{diff} automatically --- never a hand-maintained list. Audio
+players appear for whichever rendered WAVs already sit beside the two
+scores, so run @command{render} on both first. Identical scores produce a
+notice and no page.
+
+All outputs are non-clobbering; @option{--force} overwrites.
+
+@node Editing Scores
+@chapter Editing Scores
+
+Editing is deliberately @emph{not} a chantey command. Real requests arrive
+in informal musical language --- ``the figure in the bass: B-flat, B-flat,
+C, D in eighths; split all but the first into twinned sixteenths,
+everywhere it occurs'' --- and every one reduces to the same primitive:
+@emph{match a shape, transform it, report the measures}. That is a short
+music21 script, not a frozen command surface. The worked example (the
+request above, verbatim from real use):
+
+@example
+from music21 import converter, beam
+import copy
+
+s = converter.parse("tune.musicxml")
+for meas in s.parts[1].getElementsByClass("Measure"):
+    notes = [el for el in meas.notesAndRests if el.isNote]
+    for i in range(len(notes) - 3):
+        run = notes[i : i + 4]
+        if any(float(n.duration.quarterLength) != 0.5 for n in run):
+            continue
+        ps = [n.pitch.midi for n in run]
+        if ps[1]-ps[0] == 12 and ps[2]-ps[1] in (1,2) and ps[3]-ps[2] in (1,2):
+            for el in run[1:]:              # the first note keeps its eighth
+                el.duration.quarterLength = 0.25
+                el.beams = beam.Beams()
+                meas.insert(float(el.offset) + 0.25, copy.deepcopy(el))
+s.write("musicxml", fp="revised.musicxml")
+@end example
+
+Note the shape match (an octave leap then two rising steps) rather than
+literal pitches --- informal descriptions often name the notes but miss
+the octave, and figures recur transposed. Report the changed measures back
+(via @command{chantey diff}) before rendering, so a too-eager match gets
+caught by a human first.
+
+@node OMR and Proofing
+@chapter OMR and Proofing
+
+Optical music recognition is the one lossy step in the pipeline, so it
+gets honest treatment. Audiveris performs well on clean, born-digital
+engravings, acceptably on good scans, poorly on photos and handwriting.
+
+After any PDF ingest:
+
+@enumerate
+@item
+Run @command{chantey info} --- structural absurdities (missing parts, zero
+notes) show up immediately.
+@item
+Render the transcription back (@command{chantey render}) and compare
+against the original PDF @emph{by eye} (the engraving) and @emph{by ear}
+(the piano render).
+@item
+Fix what matters in the canonical MusicXML. It is the source now; the PDF
+is history.
+@end enumerate
+
+Known loss classes: tempo and expression text, fingerings (occasionally
+misread as dynamics), articulation glyphs. Pitches and rhythms survive
+well on clean input.
+
+@node The Two Voices
+@chapter The Two Voices
+
+@table @strong
+@item piano
+music21 writes MIDI; FluidSynth renders it with a General MIDI SoundFont.
+Realistic instrument sound --- what you listen to for pleasure and for
+judging a chord voicing's color.
+
+@item synth
+chantey converts the score to a hornpipe score and hornpipe renders it.
+Synth-class timbre, but @emph{deterministic}: the same score produces a
+bit-identical WAV, every time, which makes renders reproducible and
+regressions detectable.
+@end table
+
+Two guarantees, both earned from a real defect found during development:
+
+@itemize @bullet
+@item
+@strong{The voices always agree about form.} Repeats and voltas are
+expanded once, identically, for both. (The defect: one voice honored a
+chorus repeat, the other flattened it --- 180 vs. 142 seconds of the same
+piece.)
+@item
+@strong{Tempo changes just work.} hornpipe is single-tempo by design, so
+the converter resolves every metronome mark itself and emits timing in
+absolute seconds. A piece that moves from quarter=100 to quarter=102
+mid-score renders correctly in both voices.
+@end itemize
+
+The engraved PDF, by contrast, keeps repeat @emph{notation} on the page
+--- players read repeats; audio files play them out.
+
+@node Licensed Material
+@chapter Licensed Material
+
+Much sheet music is copyrighted --- including modern arrangements of
+public-domain tunes (check the fine print; a 1907 song can carry a 2012
+arrangement copyright). The rules chantey is built around:
+
+@itemize @bullet
+@item
+Work privately and locally on lawfully obtained copies. chantey never
+publishes, uploads, or hosts anything; the comparison page is a local
+file. Sharing decisions belong to you alone.
+@item
+Keep working scores and everything derived from them in a directory your
+version control ignores, so licensed material never enters repository
+history.
+@end itemize
+
+@node Reference
+@chapter Reference
+
+@section Environment
+
+@table @code
+@item CHANTEY_SOUNDFONT
+Path to the General MIDI SoundFont for the piano voice. Default:
+@file{/usr/share/sounds/sf2/FluidR3_GM.sf2}.
+@end table
+
+@section Exit status
+
+0 --- success (including ``identical scores'' outcomes). 1 --- error:
+unparseable score, missing binary, failed external tool, refused
+overwrite. 2 --- usage error.
+
+@section Output naming
+
+For a score @file{@var{stem}.musicxml}: @file{@var{stem}.piano.wav},
+@file{@var{stem}.synth.toml}, @file{@var{stem}.synth.wav},
+@file{@var{stem}.pdf}, and (from @command{compare}) @file{compare.html}
+beside the revised score.
+
+@bye

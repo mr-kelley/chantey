@@ -1,0 +1,202 @@
+.TH CHANTEY 1 "2026-09-15" "chantey 0.1.0" "User Commands"
+.SH NAME
+chantey \- sheet-music pipeline: canonical MusicXML to sound, notation, and comparisons
+.SH SYNOPSIS
+.B chantey
+.RB [ \-\-version ]
+.I command
+.RI [ options ]
+.br
+.B chantey info
+.I score
+.br
+.B chantey ingest
+.I file
+.RB [ \-o
+.IR out.musicxml ]
+.RB [ \-\-force ]
+.br
+.B chantey render
+.I score.musicxml
+.RB [ \-\-voice
+.IR piano | synth | both ]
+.RB [ \-\-no\-pdf ]
+.RB [ \-o
+.IR dir ]
+.RB [ \-\-force ]
+.br
+.B chantey diff
+.I original revised
+.RB [ \-v ]
+.br
+.B chantey compare
+.I original revised
+.RB [ \-o
+.IR out.html ]
+.RB [ \-\-force ]
+.SH DESCRIPTION
+.B chantey
+turns written sheet music into things you can hear and compare. Its central
+idea:
+.B the PDF is a rendering, not the source
+\(em one canonical MusicXML file per piece is the single source of truth,
+and audio and notation are both renders of it. Edit the source and
+everything regenerates consistently; compare two versions and the changed
+measures are found automatically.
+.PP
+The intended workflow: obtain or transcribe a score into canonical
+MusicXML; request a change in musical terms (\(lqthe chord in measures
+12\-16\(rq, \(lqthat bass figure, everywhere it occurs\(rq); apply it as a
+small music21 script; then use
+.B diff
+to confirm exactly which measures changed,
+.B render
+to hear both versions, and
+.B compare
+to see them engraved side by side with the changes highlighted.
+.PP
+chantey wraps existing engines rather than reimplementing them: Audiveris
+(optical music recognition), MuseScore (PDF engraving), FluidSynth (piano
+audio), Verovio (SVG engraving), and
+.BR hornpipe (1)
+(its companion deterministic synthesizer).
+.SH COMMANDS
+.TP
+.BI "info " score
+Parse and summarize: title/composer, parts and measure counts, key and time
+signatures with their change points, tempo marks, note count, repeat
+barlines and voltas. Run it first, always \(em it is the quick check that
+an ingest worked and the reference map for edit requests.
+.TP
+.BI "ingest " file " \fR[\fP\-o " out.musicxml "\fR]\fP [\-\-force]"
+Produce the canonical MusicXML. For
+.B .mxl
+or
+.B .musicxml
+input (always preferred \(em lossless, nothing to proof), normalize to
+uncompressed canonical form. For
+.B .pdf
+input, run Audiveris OMR headless (chantey supplies the flatpak
+\-\-filesystem plumbing) and convert its export; a reminder of the known
+OMR loss classes and the proofing procedure is printed. Metadata is
+carried through; a missing title is backfilled from the filename.
+Non\-clobbering.
+.TP
+.BI "render " score.musicxml " \fR[\fP\-\-voice " piano | synth | both "\fR]\fP [\-\-no\-pdf] [\-o " dir "\fR]\fP [\-\-force]"
+Render audio and notation. Outputs land beside the score (or in
+.IR dir ):
+.IB stem .piano.wav
+(MIDI through FluidSynth with a General MIDI SoundFont),
+.IB stem .synth.toml
+and
+.IB stem .synth.wav
+(a hornpipe score and its deterministic render), and
+.IB stem .pdf
+(MuseScore engraving, repeat notation preserved on the page). Default
+voice is
+.BR both .
+Two guarantees: repeats and voltas are expanded once and identically for
+both audio voices, so they can never disagree about the piece's form; and
+the synth conversion normalizes all timing to seconds, so mid\-score tempo
+changes work even though hornpipe itself is single\-tempo.
+Non\-clobbering.
+.TP
+.BI "diff " original " " revised " \fR[\fP\-v\fR]\fP"
+Compare two versions measure by measure (note pitches, positions, and
+durations, per part) and print the changed\-measure list \(em the lingua
+franca for reporting an edit back (\(lqchanged mm. 7, 15, 56...\(rq).
+.B \-v
+adds per\-part detail. Identical scores are reported as such. Exit 0 either
+way.
+.TP
+.BI "compare " original " " revised " \fR[\fP\-o " out.html "\fR]\fP [\-\-force]"
+Emit the comparison page: one self\-contained local HTML file with both
+versions engraved side by side (Verovio SVG),
+.B every measure numbered,
+the changed measures \(em found by
+.BR diff ,
+never hand\-listed \(em highlighted in crimson in both columns, and audio
+players for whatever rendered WAVs already sit beside the scores (run
+.B render
+first). Identical scores produce a notice and no page. Non\-clobbering.
+.SH EDITING
+Deliberately not a command. Musical edits are short music21 scripts written
+per request; every real request reduces to
+.IR "match a shape, transform it, report the measures" .
+The README carries a worked example (splitting a recurring bass figure into
+twinned sixteenths, applied at all six occurrences the scan found). After
+any edit, run
+.B chantey diff
+to confirm the changed measures before rendering.
+.SH EXTERNAL PREREQUISITES
+Checked at use; a missing one produces an actionable error, never a silent
+skip.
+.TP
+.B Audiveris
+PDF \(-> MusicXML (OMR). flatpak: first
+.B flatpak remote\-add \-\-user \-\-if\-not\-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+then
+.BR "flatpak install \-y \-\-user flathub org.audiveris.audiveris" .
+Only needed for PDF ingest.
+.TP
+.B mscore3
+PDF engraving:
+.BR "sudo apt install musescore3" .
+Run headless by chantey (QT_QPA_PLATFORM=offscreen).
+.TP
+.B fluidsynth
+Piano voice:
+.BR "sudo apt install fluidsynth fluid\-soundfont\-gm" .
+.TP
+.B hornpipe
+Deterministic synth voice \(em companion tool:
+.BR "uv tool install git+https://github.com/mr\-kelley/hornpipe" .
+.SH ENVIRONMENT
+.TP
+.B CHANTEY_SOUNDFONT
+Path to the General MIDI SoundFont for the piano voice. Default
+.IR /usr/share/sounds/sf2/FluidR3_GM.sf2 .
+.SH OMR PROOFING
+Audiveris is good on clean born\-digital engravings, workable on scans,
+poor on photos. After a PDF ingest, always proof: render the result and
+compare against the original by eye and ear. Known loss classes: tempo and
+expression text, fingerings (occasionally misread as dynamics),
+articulation glyphs. Fix what matters in the canonical MusicXML \(em it is
+the source now. Born\-digital MusicXML, when it exists, skips all of this.
+.SH LICENSED MATERIAL
+Much sheet music is copyrighted, including modern arrangements of
+public\-domain tunes. chantey is built for private, local work on lawfully
+obtained copies: it never publishes, uploads, or hosts anything \(em the
+comparison page is a local file. Keep working scores and derived artifacts
+in a directory excluded from version control, so licensed material never
+enters repository history.
+.SH EXIT STATUS
+.TP
+.B 0
+Success (including \(lqidentical scores\(rq outcomes).
+.TP
+.B 1
+Error: unparseable score, missing binary, failed external tool, refused
+overwrite.
+.TP
+.B 2
+Usage error.
+.SH EXAMPLE
+.nf
+.RS
+chantey ingest tune.mxl                # \(-> tune.musicxml (canonical)
+chantey info tune.musicxml
+#   ...apply the requested edit as a music21 script \(-> revised.musicxml...
+chantey diff tune.musicxml revised.musicxml
+chantey render tune.musicxml
+chantey render revised.musicxml
+chantey compare tune.musicxml revised.musicxml
+#   open compare.html in a browser
+.RE
+.fi
+.SH SEE ALSO
+.BR hornpipe (1),
+.BR fluidsynth (1),
+and the Texinfo manual
+.RB ( "info chantey" ),
+which covers the workflow and concepts in tutorial form.
