@@ -40,6 +40,10 @@ def test_audiveris_argv_grants_filesystem():
         "/usr/bin/flatpak", Path("/work"), Path("/work/x.pdf"), Path("/tmp/out")
     )
     assert argv[:3] == ["/usr/bin/flatpak", "run", "--filesystem=/work"]
+    # the export dir is a host temp dir; the sandbox's /tmp is private
+    assert "--filesystem=/tmp/out" in argv
+    assert argv.index("--filesystem=/tmp/out") < argv.index(depsmod.AUDIVERIS_APP)
+    assert argv[argv.index("-output") + 1] == "/tmp/out"
     assert depsmod.AUDIVERIS_APP in argv
     assert "-batch" in argv and "-export" in argv
     assert argv[-1] == "/work/x.pdf"

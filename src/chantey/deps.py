@@ -97,11 +97,14 @@ def soundfont_path(deps: Deps) -> str:
 
 def audiveris_argv(flatpak: str, workdir: Path, pdf: Path, outdir: Path) -> list[str]:
     """Headless OMR. The flatpak sandbox only sees xdg-documents/pictures by
-    default, so the working directory must be granted explicitly."""
+    default, so the working directory must be granted explicitly. The output
+    directory is granted too: it is a host temp dir, and the sandbox has its
+    own private /tmp, so an ungranted export lands where chantey can't see it."""
     return [
         flatpak,
         "run",
         f"--filesystem={workdir}",
+        f"--filesystem={outdir}",
         AUDIVERIS_APP,
         "-batch",
         "-export",
