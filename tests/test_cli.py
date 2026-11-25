@@ -2,6 +2,7 @@ import copy
 import shutil
 from pathlib import Path
 
+import pytest
 from music21 import pitch
 
 from chantey.cli import main
@@ -99,6 +100,52 @@ def test_render_voice_selection(score_file, tmp_path):
     assert Path(f"{stem}.piano.wav").exists()
     assert not Path(f"{stem}.synth.wav").exists()
     assert not Path(f"{stem}.pdf").exists()
+
+
+def _fluidsynth_call(calls):
+    return next(c for c in calls if Path(c[0]).name == "fluidsynth")
+
+
+def test_render_piano_is_dry_by_default(score_file, tmp_path, capsys):
+    score = score_file()
+    deps, calls = fake_deps(tmp_path)
+    assert main(["render", str(score), "--voice", "piano", "--no-pdf"], deps=deps) == 0
+    assert _fluidsynth_call(calls)[-4:] == ["-C", "0", "-R", "0"]
+    piano = f"{score.with_suffix('')}.piano.wav"
+    assert f"Wrote {piano}  [fx: dry]" in capsys.readouterr().out.splitlines()
+
+
+def test_render_fx_default_passes_no_effects_flags(score_file, tmp_path, capsys):
+    score = score_file()
+    deps, calls = fake_deps(tmp_path)
+    assert main(["render", str(score), "--fx", "default"], deps=deps) == 0
+    fs = _fluidsynth_call(calls)
+    assert "-C" not in fs and "-R" not in fs and "-o" not in fs
+    lines = capsys.readouterr().out.splitlines()
+    # only the piano voice carries the fx note
+    assert [ln for ln in lines if "[fx:" in ln] == [
+        f"Wrote {score.with_suffix('')}.piano.wav  [fx: default]"
+    ]
+    assert f"Wrote {score.with_suffix('')}.synth.wav" in lines
+
+
+def test_render_env_opts_appended_and_recorded(score_file, tmp_path, capsys):
+    score = score_file()
+    deps, calls = fake_deps(tmp_path)
+    deps.environ["CHANTEY_FLUIDSYNTH_OPTS"] = "-o synth.polyphony=128"
+    argv = ["render", str(score), "--voice", "piano", "--no-pdf", "--fx", "light"]
+    assert main(argv, deps=deps) == 0
+    fs = _fluidsynth_call(calls)
+    assert fs[-3:] == ["synth.reverb.room-size=0.3", "-o", "synth.polyphony=128"]
+    out = capsys.readouterr().out
+    assert "[fx: light; CHANTEY_FLUIDSYNTH_OPTS: -o synth.polyphony=128]" in out
+
+
+def test_render_rejects_unknown_fx(score_file, tmp_path):
+    deps, _ = fake_deps(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        main(["render", str(score_file()), "--fx", "wet"], deps=deps)
+    assert exc.value.code == 2
 
 
 def test_diff_reports_changed_measures(tmp_path, capsys):

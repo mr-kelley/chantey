@@ -1,12 +1,11 @@
 [project]
 name = "chantey"
-version = "0.1.0"
+version = "0.7.0"
 description = "Sheet-music pipeline: canonical MusicXML in; audio (piano + hornpipe synth), notation (PDF/SVG), measure diffs, and a side-by-side comparison page out."
 readme = "README.md"
-requires-python = "==3.12.*"
 license = "Apache-2.0"
 authors = [{ name = "Mike Kelley" }]
-# Heavy runtime dependencies: music21 (parsing/edits/MIDI) and verovio (SVG engraving).
+requires-python = "==3.12.*"
 dependencies = [
     "music21>=10,<11",
     "verovio>=6,<7",
@@ -23,6 +22,7 @@ requires = ["uv_build>=0.11,<0.12"]
 build-backend = "uv_build"
 
 [dependency-groups]
+# Dev-only tooling.
 dev = [
     "ruff>=0.14,<0.15",
     "pytest>=8,<9",

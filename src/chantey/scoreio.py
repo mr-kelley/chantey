@@ -13,7 +13,10 @@ from pathlib import Path
 
 from music21 import bar, converter, key, meter, spanner, stream, tempo
 
+from .convert import expand_repeats
 from .errors import ScoreLoadError
+from .expression import tail_quarters
+from .sfzengine import EOT_TAIL_S
 
 
 def load_score(path: Path | str) -> stream.Score:
@@ -33,7 +36,10 @@ def load_score(path: Path | str) -> stream.Score:
 class Info:
     title: str | None
     composer: str | None
-    parts: list[tuple[str, int]]  # (name, measure count)
+    # (name, measure count, quarters as rendered, quarters as written); the
+    # rendered timeline (repeats expanded) is the expression sidecar's
+    parts: list[tuple[str, int, float, float]]
+    tail_quarters: float  # the render tail, in quarters at the final tempo
     keys: list[tuple[int, int]]  # (measure, sharps)
     times: list[tuple[int, str]]  # (measure, ratio)
     tempos: list[tuple[int, str]]  # (measure, description)
@@ -41,13 +47,21 @@ class Info:
     repeat_barlines: int
     voltas: int
     warnings: list[str] = field(default_factory=list)
+    # per part, lines printed indented under it (v0.6: its SFZ's keyswitches)
+    part_notes: list[list[str]] = field(default_factory=list)
 
 
 def score_info(score: stream.Score) -> Info:
     md = score.metadata
+    expanded, repeat_warning = expand_repeats(score)
     parts = [
-        (p.partName or f"part{i + 1}", len(p.getElementsByClass(stream.Measure)))
-        for i, p in enumerate(score.parts)
+        (
+            p.partName or f"part{i + 1}",
+            len(p.getElementsByClass(stream.Measure)),
+            float(rendered.highestTime),
+            float(p.highestTime),
+        )
+        for i, (p, rendered) in enumerate(zip(score.parts, expanded.parts, strict=True))
     ]
     keys = []
     for el in score.recurse().getElementsByClass(key.KeySignature):
@@ -69,6 +83,7 @@ def score_info(score: stream.Score) -> Info:
         title=md.title if md else None,
         composer=(md.composer or None) if md else None,
         parts=parts,
+        tail_quarters=tail_quarters(expanded),
         keys=sorted(keys),
         times=sorted(times),
         tempos=sorted(tempos),
@@ -76,6 +91,8 @@ def score_info(score: stream.Score) -> Info:
         repeat_barlines=len(list(score.recurse().getElementsByClass(bar.Repeat))),
         voltas=len(list(score.recurse().getElementsByClass(spanner.RepeatBracket))),
     )
+    if repeat_warning:
+        info.warnings.append(repeat_warning)
     if not info.parts:
         info.warnings.append("score has no parts")
     if info.note_count == 0:
@@ -87,8 +104,18 @@ def format_info(info: Info) -> str:
     lines = []
     if info.title:
         lines.append(f"title: {info.title}" + (f" — {info.composer}" if info.composer else ""))
-    for name, n in info.parts:
-        lines.append(f"part {name!r}: {n} measures")
+    for i, (name, n, rendered, written) in enumerate(info.parts):
+        line = f"part {name!r}: {n} measures; {rendered:g} quarters"
+        if rendered != written:
+            line += f" as rendered (repeats expanded; {written:g} as written)"
+        lines.append(line)
+        if i < len(info.part_notes):
+            lines.extend(f"  {note}" for note in info.part_notes[i])
+    if info.parts:
+        lines.append(
+            f"render tail: {EOT_TAIL_S:g} s = {info.tail_quarters:g} quarters at the final "
+            "tempo (expression offsets may run to a part's quarters plus this)"
+        )
     if info.keys:
         lines.append("keys: " + ", ".join(f"{s:+d} sharps @ m{m}" for m, s in info.keys))
     if info.times:

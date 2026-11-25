@@ -1,4 +1,4 @@
-.TH CHANTEY 1 "2026-09-15" "chantey 0.1.0" "User Commands"
+.TH CHANTEY 1 "2026-10-23" "chantey 0.7.0" "User Commands"
 .SH NAME
 chantey \- sheet-music pipeline: canonical MusicXML to sound, notation, and comparisons
 .SH SYNOPSIS
@@ -9,6 +9,8 @@ chantey \- sheet-music pipeline: canonical MusicXML to sound, notation, and comp
 .br
 .B chantey info
 .I score
+.RB [ \-\-sfz
+.IR path ]
 .br
 .B chantey ingest
 .I file
@@ -20,6 +22,14 @@ chantey \- sheet-music pipeline: canonical MusicXML to sound, notation, and comp
 .I score.musicxml
 .RB [ \-\-voice
 .IR piano | synth | both ]
+.RB [ \-\-engine
+.IR fluidsynth | sfizz ]
+.RB [ \-\-sfz
+.IR path ]
+.RB [ \-\-fx
+.IR dry | light | default ]
+.RB [ \-\-expression
+.IR file ]
 .RB [ \-\-no\-pdf ]
 .RB [ \-o
 .IR dir ]
@@ -56,17 +66,33 @@ to hear both versions, and
 to see them engraved side by side with the changes highlighted.
 .PP
 chantey wraps existing engines rather than reimplementing them: Audiveris
-(optical music recognition), MuseScore (PDF engraving), FluidSynth (piano
-audio), Verovio (SVG engraving), and
+(optical music recognition), MuseScore (PDF engraving), FluidSynth or
+sfizz (piano voice), Verovio (SVG engraving), and
 .BR hornpipe (1)
 (its companion deterministic synthesizer).
 .SH COMMANDS
 .TP
-.BI "info " score
-Parse and summarize: title/composer, parts and measure counts, key and time
+.BI "info " score " \fR[\fP\-\-sfz " path "\fR]\fP"
+Parse and summarize: title/composer, parts with their measure counts and
+lengths in quarters (as rendered, repeats expanded, which is the
+.B \-\-expression
+timeline; and as written when that differs), the render tail in quarters, key and time
 signatures with their change points, tempo marks, note count, repeat
 barlines and voltas. Run it first, always \(em it is the quick check that
 an ingest worked and the reference map for edit requests.
+Under each part whose SFZ is known (its
+.B CHANTEY_SFZ_MAP
+entry, else
+.BR "\-\-sfz " path ),
+it prints that SFZ's keyswitch map:
+.BR sw_lokey \- sw_hikey ,
+.BR sw_default ,
+and each
+.B sw_last
+key with its
+.BR sw_label ,
+as MIDI keys with SFZ note names (c4 = 60). An SFZ that cannot be read is a
+warning.
 .TP
 .BI "ingest " file " \fR[\fP\-o " out.musicxml "\fR]\fP [\-\-force]"
 Produce the canonical MusicXML. For
@@ -82,11 +108,15 @@ OMR loss classes and the proofing procedure is printed. Metadata is
 carried through; a missing title is backfilled from the filename.
 Non\-clobbering.
 .TP
-.BI "render " score.musicxml " \fR[\fP\-\-voice " piano | synth | both "\fR]\fP [\-\-no\-pdf] [\-o " dir "\fR]\fP [\-\-force]"
+.BI "render " score.musicxml " \fR[\fP\-\-voice " piano | synth | both "\fR]\fP \fR[\fP\-\-engine " fluidsynth | sfizz "\fR]\fP \fR[\fP\-\-sfz " path "\fR]\fP \fR[\fP\-\-fx " dry | light | default "\fR]\fP \fR[\fP\-\-expression " file "\fR]\fP [\-\-no\-pdf] [\-o " dir "\fR]\fP [\-\-force]"
 Render audio and notation. Outputs land beside the score (or in
 .IR dir ):
 .IB stem .piano.wav
-(MIDI through FluidSynth with a General MIDI SoundFont),
+(MIDI through FluidSynth with a General MIDI SoundFont, dry by default,
+see
+.BR \-\-fx ;
+or through sfizz with one SFZ per part, see
+.BR \-\-engine ),
 .IB stem .synth.toml
 and
 .IB stem .synth.wav
@@ -100,6 +130,153 @@ both audio voices, so they can never disagree about the piece's form; and
 the synth conversion normalizes all timing to seconds, so mid\-score tempo
 changes work even though hornpipe itself is single\-tempo.
 Non\-clobbering.
+.IP
+.B \-\-fx
+sets the piano voice's FluidSynth effects.
+.B dry
+(the default) turns chorus and reverb off
+.RB ( "\-C 0 \-R 0" ),
+so stems carry no baked\-in space;
+.B light
+turns chorus off and adds a small, short reverb
+.RB ( "\-C 0 \-o synth.reverb.active=1 \-o synth.reverb.level=0.3 \-o synth.reverb.room\-size=0.3" );
+.B default
+adds nothing and keeps FluidSynth's own defaults (chorus on, reverb level
+0.9), as chantey 0.1 rendered. Arguments from
+.B CHANTEY_FLUIDSYNTH_OPTS
+follow the preset. The setting in effect is printed on the piano voice's
+output line, for example
+.BR "Wrote tune.piano.wav  [fx: dry]" .
+The synth voice and the PDF are unaffected.
+.IP
+.B \-\-engine
+selects the piano voice's engine.
+.B fluidsynth
+(the default) is the path above.
+.B sfizz
+renders each part through its own SFZ instrument: the score's MIDI is split
+into one file per part (that part's events plus the tempo map), each is
+rendered by
+.B sfizz_render \-\-sfz
+.I sfz
+.B \-\-midi
+.I mid
+.B \-\-wav
+.I wav
+.BR "\-s 44100 \-b 256 \-q 10 \-\-use\-eot" ,
+and the parts are summed at unity gain. A sum above
+\-0.1 dBFS is scaled down to it and the factor printed.
+Every part ends at the score's notated end plus 2 s (a text event at that
+tick carries the tail, because sfizz_render 1.2.3 ignores an End\-of\-Track's
+own delta), so a voice sfizz never releases cannot render forever. Each
+sfizz_render also runs under a file\-size limit of twice that length's bytes
+plus 1 MiB; reaching it stops the render and is an error naming the part,
+with nothing written. Working files go in a
+.I chantey\-sfizz\-*
+directory under
+.BR CHANTEY_TMPDIR ,
+else
+.BR TMPDIR ,
+removed on success, on error and on SIGINT, SIGTERM or SIGHUP.
+The SFZ for a part
+comes from
+.B CHANTEY_SFZ_MAP
+by part\-name, else from
+.BR "\-\-sfz " path ;
+a part with neither is an error naming it, with no fallback to FluidSynth.
+.B \-\-sfz
+without
+.B \-\-engine sfizz
+is an error.
+.B \-\-fx
+and
+.B CHANTEY_FLUIDSYNTH_OPTS
+are ignored under sfizz, and the output line says so. The output line
+records the engine, the mapping and the bound, for example
+.BR "Wrote tune.piano.wav  [engine: sfizz; sfz: Trumpet=/lib/Trumpet.sfz, Tuba=/lib/Tuba.sfz; eot: +2.0 s; cap: 68.1 MB per part]" .
+.IP
+.BI "\-\-expression " file
+merges per\-part controller curves, timing offsets (and, under sfizz, keyswitch notes) from a JSON sidecar into the piano
+voice's MIDI, under either engine, before the engine runs:
+.nf
+.RS
+{"parts": {"Trumpet": {"bend_range": 200, "curves": [
+  {"cc": 11, "interp": "linear", "points": [[0, 90], [16, 127]]},
+  {"cc": 64, "interp": "hold", "points": [[0, 0], [4, 127], [7.5, 0]]},
+  {"bend": true, "interp": "linear", "points": [[32, 0], [32.5, \-100]]}]}}}
+.RE
+.fi
+Parts are matched by part\-name as for
+.BR CHANTEY_SFZ_MAP .
+A curve names one kind:
+.B cc
+(0\-119; values 0\-127) or
+.B bend
+(values in cents within
+.BR bend_range ,
+default 200, which must match the instrument's). Points are
+[offset, value], offsets in quarter lengths on the rendered timeline
+(repeats expanded; see
+.BR info ).
+.B hold
+sends one event per point;
+.B linear
+one per step between points, the step being 1/32 quarter or 10 ms,
+whichever is coarser. The first value holds from 0, the last to the end, and
+repeated values are dropped. Events go on the channels the part's notes
+use, before a note\-on at the same tick and after everything else there.
+An unknown part\-name, a value out of range, an offset past the part's
+length plus the 2 s tail, unsorted offsets, or two curves on one controller
+for one part is an error with nothing written. Under FluidSynth, a part
+with curves that shares a MIDI channel with another part is an error.
+.IP
+A third kind,
+.BR "{\(dqkeyswitch\(dq: true, \(dqinterp\(dq: \(dqhold\(dq, \(dqpoints\(dq: [[0, 36], [16, 39]]}" ,
+picks an articulation in a keyswitch SFZ: each value is a MIDI key (0\-127),
+sent as a note\-on (velocity 100, or the curve's
+.BR \(dqvelocity\(dq ,
+1\-127) and its note\-off one tick later, before the part's notes at that
+tick. It is sent at its points only (before the first, the SFZ's
+.B sw_default
+plays), a point repeating the previous key is dropped, and
+.B hold
+is its only
+.BR interp .
+One keyswitch curve per part. A switch key inside the part's played range
+(lowest to highest note) is an error naming the key and the nearest played
+note. A keyswitch curve needs
+.BR "\-\-engine sfizz" :
+under FluidSynth it is an error, since a GM SoundFont would play the key as
+a pitch.
+.IP
+A fourth kind,
+.BR "{\(dqtime\(dq: true, \(dqinterp\(dq: \(dqlinear\(dq, \(dqpoints\(dq: [[0, 12], [64, 12], [68, \-5]]}" ,
+moves every note\-on and note\-off of the part by its value in milliseconds
+(positive is later) at that event's own written offset, converted at the
+tempo there:
+.B hold
+takes the last point at or before the offset,
+.B linear
+the exact line between points. A note's on and off are read separately, so
+its length changes by the difference. Values must lie within
+.RB \(+- time_max ,
+a part key (default 60, greater than 0, at most 1000). One time curve per
+part. Controllers, keyswitches, program changes and tempi keep their ticks,
+so a note written at a keyswitch and moved earlier plays before the switch.
+Per key, a note moved before 0 is clamped to 0, a note\-off moved past the
+next note\-on of its key is pulled back to it, and an event moved before
+the previous event of its key is raised to it. Under FluidSynth a part with
+a time curve that shares a MIDI channel is an error.
+.IP
+The piano line gains
+.BR "[expression: " file "; parts: " n "; events: " m ]
+(each switch counts as two events, its note\-on and note\-off), ending
+.BR "; shifted: " s "; clamped: " c
+when a part has a time curve (note events moved off their written tick, and
+those a clamp moved);
+the synth voice ignores the sidecar and its line says so. Without
+.BR \-\-expression ,
+or with only empty curves, the MIDI is unchanged.
 .TP
 .BI "diff " original " " revised " \fR[\fP\-v\fR]\fP"
 Compare two versions measure by measure (note pitches, positions, and
@@ -148,14 +325,49 @@ Run headless by chantey (QT_QPA_PLATFORM=offscreen).
 Piano voice:
 .BR "sudo apt install fluidsynth fluid\-soundfont\-gm" .
 .TP
+.B sfizz_render
+Piano voice under
+.BR "\-\-engine sfizz" :
+the sfztools
+.B sfizz
+package, plus the SFZ libraries to map. Only needed for that engine.
+.TP
 .B hornpipe
-Deterministic synth voice \(em companion tool:
+Deterministic synth voice:
 .BR "uv tool install git+https://github.com/mr\-kelley/hornpipe" .
 .SH ENVIRONMENT
 .TP
 .B CHANTEY_SOUNDFONT
 Path to the General MIDI SoundFont for the piano voice. Default
 .IR /usr/share/sounds/sf2/FluidR3_GM.sf2 .
+.TP
+.B CHANTEY_FLUIDSYNTH_OPTS
+Optional extra FluidSynth arguments for the piano voice, split shell\-style
+and appended after the
+.B \-\-fx
+preset. chantey forwards them unchecked; their validity is the caller's
+concern. They are printed with the fx setting on the output line.
+Ignored under
+.BR "\-\-engine sfizz" .
+.TP
+.B CHANTEY_SFZ_MAP
+Per\-part SFZ instruments for
+.BR "\-\-engine sfizz" :
+.IR "part\-name" = path ; part\-name = path ...
+Part names are the MusicXML
+.I part\-name
+text, matched exactly first, then case\-insensitively. The map wins per
+part;
+.B \-\-sfz
+fills the rest. An entry that matches no part is a warning.
+.TP
+.B CHANTEY_TMPDIR
+Directory for
+.B \-\-engine sfizz
+working files (per\-part MIDI and stems); point it at a big filesystem for
+long scores. Unset:
+.BR TMPDIR ,
+else the system default. A value naming no directory is an error.
 .SH OMR PROOFING
 Audiveris is good on clean born\-digital engravings, workable on scans,
 poor on photos. After a PDF ingest, always proof: render the result and
@@ -168,8 +380,10 @@ Much sheet music is copyrighted, including modern arrangements of
 public\-domain tunes. chantey is built for private, local work on lawfully
 obtained copies: it never publishes, uploads, or hosts anything \(em the
 comparison page is a local file. Keep working scores and derived artifacts
-in a directory excluded from version control, so licensed material never
-enters repository history.
+in a directory excluded from version control (a gitignored
+.IR scratch/ ,
+say)
+so licensed material never enters history.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -181,6 +395,12 @@ overwrite.
 .TP
 .B 2
 Usage error.
+.TP
+.B 128 + n
+Stopped by signal
+.I n
+(SIGINT, SIGTERM or SIGHUP) during an sfizz render, after its working
+files were removed.
 .SH EXAMPLE
 .nf
 .RS

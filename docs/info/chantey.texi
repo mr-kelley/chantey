@@ -1,7 +1,7 @@
 \input texinfo   @c -*-texinfo-*-
 @c %**start of header
 @setfilename chantey.info
-@settitle chantey 0.1.0
+@settitle chantey 0.7.0
 @documentencoding UTF-8
 @c %**end of header
 
@@ -11,7 +11,7 @@
 @end direntry
 
 @copying
-This manual documents chantey version 0.1.0, a command-line pipeline that
+This manual documents chantey version 0.7.0, a command-line pipeline that
 turns written sheet music into audio, notation, measure-level diffs, and
 side-by-side comparison pages.
 @end copying
@@ -19,7 +19,7 @@ side-by-side comparison pages.
 @titlepage
 @title chantey
 @subtitle Sheet music @arrow{} sound & views
-@subtitle Version 0.1.0
+@subtitle Version 0.7.0
 @end titlepage
 
 @contents
@@ -94,12 +94,16 @@ Optical music recognition. Skip it if your scores exist as MusicXML.
 @example
 uv tool install git+https://github.com/mr-kelley/hornpipe
 @end example
+
+@item sfizz --- only for @option{--engine sfizz}
+The sfztools @code{sfizz} package, which provides @command{sfizz_render},
+plus whatever SFZ libraries you map to your parts.
 @end table
 
 chantey itself carries heavy Python dependencies (music21, Verovio) in its
-own environment; install it the same way (@code{uv tool install
-git+https://github.com/mr-kelley/chantey}) or run it from a clone with
-@code{uv run chantey}.
+own environment; install it with
+@code{uv tool install git+https://github.com/mr-kelley/chantey}, or run it
+from a clone with @code{uv sync}, then @code{uv run chantey}.
 
 @node The Workflow
 @chapter The Workflow
@@ -131,12 +135,46 @@ request. And run @command{diff} after every edit, @emph{before} rendering
 @section info
 
 @example
-chantey info @var{score}
+chantey info @var{score} [--sfz @var{path}]
 @end example
 
 Title and composer, parts with measure counts, key and time signatures
 with their change points, tempo marks, note count, repeat barlines and
 voltas.
+
+Each part's line also gives its length in quarters as rendered, with
+repeats expanded, and as written when that differs. A following line gives
+the render tail (2 s) in quarters at the final tempo. Together they bound
+the offsets an expression sidecar may use (@pxref{Expression}), so a
+sidecar can be checked without a render:
+
+@example
+part 'Trumpet': 32 measures; 160 quarters as rendered (repeats expanded; 128 as written)
+render tail: 2 s = 3.33333 quarters at the final tempo (expression offsets may run to a part's quarters plus this)
+@end example
+
+Under each part whose SFZ is known --- its @env{CHANTEY_SFZ_MAP} entry,
+else @option{--sfz @var{path}} --- @command{info} prints that SFZ's
+keyswitch map, so an articulation can be mapped to the key a
+@code{keyswitch} curve sends (@pxref{Expression}) without reading the SFZ
+by hand. Keys are MIDI numbers with SFZ note names (middle C is
+@code{c4} = 60):
+
+@example
+part 'Trumpet': 32 measures; 160 quarters
+  sfz: /lib/VPO/trumpet-SEC-KS-C2.sfz
+  keyswitches: sw_lokey 36 (c2) to sw_hikey 40 (e2); sw_default 36 (c2)
+    sw_last 36 (c2): Sustain
+    sw_last 38 (d2): Normal
+    sw_last 39 (d#2): Accent
+    sw_last 40 (e2): Staccato
+@end example
+
+The reader follows @code{<global>}, @code{<master>}, @code{<group>} and
+@code{<region>} inheritance, @code{#define} and @code{#include}. If the
+file sets @code{note_offset} or @code{octave_offset}, a note says the keys
+are shown as written. An SFZ that cannot be read is a warning, not an
+error.
 
 @section ingest
 
@@ -154,7 +192,9 @@ a missing title is backfilled from the filename.
 @section render
 
 @example
-chantey render @var{score} [--voice piano|synth|both] [--no-pdf]
+chantey render @var{score} [--voice piano|synth|both]
+               [--engine fluidsynth|sfizz] [--sfz @var{path}]
+               [--fx dry|light|default] [--expression @var{file}] [--no-pdf]
                [-o @var{dir}] [--force]
 @end example
 
@@ -162,6 +202,152 @@ Writes, beside the score or in @var{dir}: @file{@var{stem}.piano.wav},
 @file{@var{stem}.synth.toml} + @file{@var{stem}.synth.wav}, and
 @file{@var{stem}.pdf}. @xref{The Two Voices}, for what the voices are and
 the guarantees they share.
+
+@option{--fx} sets the piano voice's FluidSynth effects:
+
+@table @code
+@item dry
+The default. Chorus and reverb off (@code{-C 0 -R 0}), so a stem carries
+no baked-in space for the mix to fight.
+@item light
+Chorus off and a small, short reverb (@code{-C 0 -o synth.reverb.active=1
+-o synth.reverb.level=0.3 -o synth.reverb.room-size=0.3}).
+@item default
+Nothing added: FluidSynth's own defaults (chorus on, reverb level 0.9),
+which is how chantey 0.1 rendered.
+@end table
+
+Arguments in @env{CHANTEY_FLUIDSYNTH_OPTS} follow the preset. The setting
+in effect is printed on the piano voice's output line, for example
+@samp{Wrote tune.piano.wav  [fx: dry]}. The synth voice and the PDF are
+unaffected.
+
+@option{--engine} selects the piano voice's engine: @code{fluidsynth} (the
+default, everything above) or @code{sfizz}, one SFZ instrument per part.
+Under @code{sfizz} the score's MIDI is split into one file per part (that
+part's events plus the tempo map, with the same repeat expansion), and each
+part is rendered with
+
+@example
+sfizz_render --sfz @var{sfz} --midi @var{mid} --wav @var{wav} -s 44100 -b 256 -q 10 --use-eot
+@end example
+
+The parts are summed at unity gain. If the sum
+would exceed @minus{}0.1 dBFS, the whole mix is scaled down to it and the
+factor is printed.
+
+Every part ends at the score's notated end plus 2 s. Without
+@option{--use-eot}, sfizz renders until every voice is silent, and sfizz
+1.2.3 can lose a note-off (a @code{delay_random} patch over a looped
+sample), so a render could run until the disk is full. sfizz_render 1.2.3
+ignores an End-of-Track's own delta, so a text event at that tick carries
+the tail. Each @command{sfizz_render} also runs under a file-size limit of
+twice that length's bytes plus 1 MiB. Reaching it stops the render, and
+chantey reports an error naming the part, with nothing written. Working
+files go in a @file{chantey-sfizz-*} directory under
+@env{CHANTEY_TMPDIR}, else @env{TMPDIR}. It is removed on success, on
+error, and on SIGINT, SIGTERM or SIGHUP.
+
+A part's SFZ comes from @env{CHANTEY_SFZ_MAP} by its part-name, or else
+from @option{--sfz @var{path}}. A part with neither is an error that names
+it; chantey never falls back to FluidSynth. @option{--sfz} without
+@option{--engine sfizz} is an error. @option{--fx} and
+@env{CHANTEY_FLUIDSYNTH_OPTS} are ignored under @code{sfizz}, and the
+output line says so. That line records the engine, the mapping and the
+bound:
+
+@example
+Wrote x.piano.wav  [engine: sfizz; sfz: Trumpet=/lib/Trumpet.sfz, Tuba=/lib/Tuba.sfz; eot: +2.0 s; cap: 68.1 MB per part]
+@end example
+
+@anchor{Expression}
+@option{--expression @var{file}} merges per-part controller curves from a
+JSON sidecar into the piano voice's MIDI before the engine runs, under
+either engine. music21's export carries no controllers, so without them
+every held note sounds at one dynamic. Sampled instruments are built around
+CC1 (layer crossfade), CC11 (expression) and CC64 (sustain).
+
+@example
+@{"parts": @{"Trumpet": @{"bend_range": 200, "curves": [
+  @{"cc": 11, "interp": "linear", "points": [[0, 90], [16, 127]]@},
+  @{"cc": 64, "interp": "hold", "points": [[0, 0], [4, 127], [7.5, 0]]@},
+  @{"bend": true, "interp": "linear", "points": [[32, 0], [32.5, -100]]@}]@}@}@}
+@end example
+
+Parts are matched by part-name as @env{CHANTEY_SFZ_MAP} matches them.
+Each curve names one kind: @code{cc} (0--119, values 0--127) or
+@code{bend} (values in cents within @code{bend_range}, default 200, which
+must match the instrument's own range). Points are @code{[offset, value]},
+with offsets in quarter lengths on the rendered timeline (repeats
+expanded). @code{hold} sends one event per point. @code{linear} sends one
+per step between points, the step being 1/32 quarter or 10 ms, whichever is
+coarser. The first value holds from 0 and the last holds to the end.
+Repeated values are dropped.
+
+Events go on the channels the part's notes use. At a tick shared with the
+notes they come before a note-on and after everything else, so a note
+sounds with its value. An unknown part-name, a value out of range, an
+offset past the part's length plus the 2 s tail, unsorted offsets, or two
+curves on one controller for one part stops the render with nothing
+written. Under FluidSynth all parts share one file, so a part with curves
+that shares a MIDI channel with another part is an error. Give the parts
+distinct instruments, or use @option{--engine sfizz}.
+
+A third kind, @code{keyswitch}, picks the recording in a keyswitch SFZ
+(VPO's @code{*-KS-*} patches), note by note:
+
+@example
+@{"keyswitch": true, "interp": "hold", "points": [[0, 36], [16, 39], [20.5, 40]]@}
+@end example
+
+Each value is a MIDI key. At each point chantey sends that key's note-on
+(velocity 100, or the curve's @code{"velocity"}, 1--127) and its note-off
+one tick later, before any of the part's note-ons at that tick, so the
+note there plays the new articulation. A keyswitch is sent at its points
+only: before the first, the SFZ's @code{sw_default} plays. A point that
+repeats the previous key is dropped. @code{hold} is the only
+@code{interp}, and a part has at most one keyswitch curve. A switch key
+inside the part's played range (its lowest to highest note) would sound as
+a pitch, so it is an error naming the key and the nearest played note.
+Keyswitches need @option{--engine sfizz}: under FluidSynth a keyswitch
+curve is an error, because a GM SoundFont would play the key.
+
+A fourth kind, @code{time}, moves each of the part's notes by a few
+milliseconds, the lean of a section behind or ahead of the beat:
+
+@example
+@{"time": true, "interp": "linear", "points": [[0, 12], [64, 12], [68, -5]]@}
+@end example
+
+Values are milliseconds, positive later, within @code{time_max} either way
+(a part key beside @code{bend_range}: default 60, greater than 0, at most
+1000). One time curve per part. Every note-on and note-off moves by the
+curve's value at its own written offset, converted to ticks at the tempo
+there: @code{hold} takes the last point at or before the offset,
+@code{linear} the exact line between points. A note's on and off are read
+separately, so its length changes by the difference. Controllers,
+keyswitches, program changes and tempi keep their ticks, so a note written
+at a keyswitch and moved earlier plays before the switch. Per key, a note
+moved before 0 is clamped to 0, a note-off moved past the next note-on of
+its key is pulled back to it, and an event moved before the previous event
+of its key is raised to it. Under FluidSynth a part with a time curve that
+shares a MIDI channel with another part is an error.
+
+The piano line gains a second bracket, and the synth voice, which ignores
+the sidecar, says so. Each switch counts as two events there, its note-on
+and its note-off. When a part has a time curve the bracket ends
+@code{; shifted: @var{s}; clamped: @var{c}}: the note events moved off
+their written tick, and those a clamp moved:
+
+@example
+Wrote x.piano.wav  [engine: sfizz; ...]  [expression: x.expr.json; parts: 3; events: 1412]
+Wrote x.synth.wav  [--expression ignored (piano voice only)]
+@end example
+
+Without @option{--expression}, or with only empty curves, the MIDI and
+the render are byte-identical to chantey 0.4.0's. A sidecar without a
+@code{keyswitch} curve gives the same bytes as under 0.5.0, and one
+without a @code{time} curve the same bytes as under 0.6.0.
 
 @section diff
 
@@ -258,7 +444,8 @@ well on clean input.
 @item piano
 music21 writes MIDI; FluidSynth renders it with a General MIDI SoundFont.
 Realistic instrument sound --- what you listen to for pleasure and for
-judging a chord voicing's color.
+judging a chord voicing's color. With @option{--engine sfizz}, sfizz
+renders each part through its own multi-sampled SFZ instrument instead.
 
 @item synth
 chantey converts the score to a hornpipe score and hornpipe renders it.
@@ -299,8 +486,8 @@ publishes, uploads, or hosts anything; the comparison page is a local
 file. Sharing decisions belong to you alone.
 @item
 Keep working scores and everything derived from them in a directory your
-version control ignores, so licensed material never enters repository
-history.
+version control ignores (a gitignored @file{scratch/}, say), so
+licensed material never enters history.
 @end itemize
 
 @node Reference
@@ -312,13 +499,31 @@ history.
 @item CHANTEY_SOUNDFONT
 Path to the General MIDI SoundFont for the piano voice. Default:
 @file{/usr/share/sounds/sf2/FluidR3_GM.sf2}.
+@item CHANTEY_FLUIDSYNTH_OPTS
+Optional extra FluidSynth arguments for the piano voice, split shell-style
+and appended after the @option{--fx} preset. chantey forwards them
+unchecked; their validity is the caller's concern. Ignored under
+@option{--engine sfizz}.
+@item CHANTEY_SFZ_MAP
+Per-part SFZ instruments for @option{--engine sfizz}:
+@samp{@var{part-name}=@var{path};@var{part-name}=@var{path}}. Part names
+are the MusicXML @code{part-name} text, matched exactly first, then
+case-insensitively. The map wins per part; @option{--sfz} fills the rest.
+An entry that matches no part is a warning.
+@item CHANTEY_TMPDIR
+Directory for @option{--engine sfizz} working files (per-part MIDI and
+stems); point it at a big filesystem for long scores. Unset:
+@env{TMPDIR}, else the system default. A value naming no directory is an
+error.
 @end table
 
 @section Exit status
 
 0 --- success (including ``identical scores'' outcomes). 1 --- error:
 unparseable score, missing binary, failed external tool, refused
-overwrite. 2 --- usage error.
+overwrite. 2 --- usage error. 128 + @var{n} --- stopped by signal @var{n}
+(SIGINT, SIGTERM or SIGHUP) during an sfizz render, after its working
+files were removed.
 
 @section Output naming
 
