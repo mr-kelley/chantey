@@ -27,10 +27,13 @@ def _measure_signatures(part: stream.Part) -> dict[int, tuple]:
     sigs: dict[int, tuple] = {}
     for meas in part.getElementsByClass(stream.Measure):
         events = []
-        for el in meas.notes:
+        # recurse() reaches notes inside Voices (multi-voice staves); offsets
+        # are taken relative to the measure, not to the enclosing voice.
+        for el in meas.recurse().notes:
             pitches = tuple(sorted(p.midi for p in el.pitches))
+            offset = el.getOffsetInHierarchy(meas)
             events.append(
-                (round(float(el.offset), 4), round(float(el.duration.quarterLength), 4), pitches)
+                (round(float(offset), 4), round(float(el.duration.quarterLength), 4), pitches)
             )
         sigs[meas.number] = tuple(sorted(events))
     return sigs
