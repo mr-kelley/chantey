@@ -53,7 +53,7 @@ def render(
 ) -> RenderResult:
     result = RenderResult()
     stem = score_path.stem
-    title = (score.metadata.title if score.metadata else None) or stem
+    title = (score.metadata.bestTitle if score.metadata else None) or stem
 
     expanded = None
     if voice in ("piano", "synth", "both"):

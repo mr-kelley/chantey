@@ -58,6 +58,18 @@ def test_ingest_normalizes_mxl(tmp_path, capsys):
     out = tmp_path / "tune.musicxml"
     assert out.exists()
     assert "Canonical score written" in capsys.readouterr().out
+
+
+def test_ingest_titles_from_movement_title(tmp_path, capsys):
+    score = build_score(title="")
+    score.metadata.title = None
+    score.metadata.movementName = "Solveig's Song"
+    mxl = tmp_path / "tune.mxl"
+    make_mxl(score, mxl)
+    assert main(["ingest", str(mxl)], deps=Deps()) == 0
+    capsys.readouterr()
+    assert main(["info", str(tmp_path / "tune.musicxml")]) == 0
+    assert "title: Solveig's Song" in capsys.readouterr().out
     # non-clobbering on second run
     assert main(["ingest", str(mxl)], deps=Deps()) == 1
 

@@ -218,7 +218,7 @@ def _cmd_compare(args, deps: Deps) -> int:
         return 0
     out = args.output or args.revised.parent / "compare.html"
     _refuse_clobber([out], args.force)
-    title = (revised.metadata.title if revised.metadata else None) or args.revised.stem
+    title = (revised.metadata.bestTitle if revised.metadata else None) or args.revised.stem
     audio = comparepage.find_audio(args.original, "Original") + comparepage.find_audio(
         args.revised, "Revised"
     )
