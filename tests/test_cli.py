@@ -211,3 +211,33 @@ def test_ingest_does_not_inject_default_composer(tmp_path, capsys):
     assert main(["info", str(tmp_path / "anon.musicxml")]) == 0
     out = capsys.readouterr().out
     assert "Music21" not in out
+
+
+def test_render_piano_leaves_chord_symbols_silent(score_file, tmp_path):
+    import dataclasses
+
+    from music21 import harmony, midi, stream
+
+    score = build_score()
+    score.parts[0].getElementsByClass(stream.Measure).first().insert(0, harmony.ChordSymbol("C"))
+    deps, _ = fake_deps(tmp_path)
+    note_ons = []
+
+    def run(argv, env=None):
+        if Path(argv[0]).name == "fluidsynth":
+            mf = midi.MidiFile()
+            mf.open(argv[3])
+            mf.read()
+            mf.close()
+            note_ons.append(
+                sum(
+                    1
+                    for e in mf.tracks[1].events
+                    if e.type == midi.ChannelVoiceMessages.NOTE_ON and e.velocity
+                )
+            )
+        return fake_run(argv, env=env)
+
+    fake_run, deps = deps.run, dataclasses.replace(deps, run=run)
+    assert main(["render", str(score_file(score)), "--voice", "piano", "--no-pdf"], deps=deps) == 0
+    assert note_ons == [8]  # part 1's eight notes; the C chord symbol adds none
