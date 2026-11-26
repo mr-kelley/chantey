@@ -75,7 +75,8 @@ def score_info(score: stream.Score) -> Info:
             times.append(entry)
     tempos = []
     for el in score.recurse().getElementsByClass(tempo.MetronomeMark):
-        referent = el.referent.type if el.referent is not None else "quarter"
+        # fullName keeps dots ("dotted quarter"); .type alone drops them
+        referent = el.referent.fullName.lower() if el.referent is not None else "quarter"
         entry = (el.measureNumber or 0, f"{referent}={el.number}")
         if entry not in tempos:
             tempos.append(entry)

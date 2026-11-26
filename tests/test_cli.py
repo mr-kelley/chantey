@@ -51,6 +51,16 @@ def test_info_prints_summary(score_file, capsys):
     assert "quarter=100" in out
 
 
+def test_info_keeps_dotted_tempo_beat(score_file, capsys):
+    from music21 import duration, stream, tempo
+
+    score = build_score(tempo_marks=())
+    first = score.parts[0].getElementsByClass(stream.Measure).first()
+    first.insert(0, tempo.MetronomeMark(number=54, referent=duration.Duration(1.5)))
+    assert main(["info", str(score_file(score))]) == 0
+    assert "tempos: dotted quarter=54" in capsys.readouterr().out
+
+
 def test_ingest_normalizes_mxl(tmp_path, capsys):
     mxl = tmp_path / "tune.mxl"
     make_mxl(build_score(title="Tune"), mxl)
