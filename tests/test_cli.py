@@ -266,3 +266,38 @@ def test_render_piano_leaves_chord_symbols_silent(score_file, tmp_path):
     fake_run, deps = deps.run, dataclasses.replace(deps, run=run)
     assert main(["render", str(score_file(score)), "--voice", "piano", "--no-pdf"], deps=deps) == 0
     assert note_ons == [8]  # part 1's eight notes; the C chord symbol adds none
+
+
+def test_render_plays_transposing_parts_at_sounding_pitch(score_file, tmp_path):
+    import dataclasses
+    import re
+
+    from music21 import instrument, interval, midi
+
+    score = build_score()
+    clarinet = instrument.Clarinet()
+    clarinet.instrumentName = "Clarinet in A"  # a name music21 reads back as in A
+    clarinet.transposition = interval.Interval("m-3")
+    score.parts[0].insert(0, clarinet)  # written C4/D4, sounding A3/B3
+    deps, _ = fake_deps(tmp_path)
+    played: list[list[int]] = []
+
+    def run(argv, env=None):
+        if Path(argv[0]).name == "fluidsynth":
+            mf = midi.MidiFile()
+            mf.open(argv[3])
+            mf.read()
+            mf.close()
+            played.extend(
+                sorted({e.pitch for e in t.events if e.type == midi.ChannelVoiceMessages.NOTE_ON})
+                for t in mf.tracks[1:]
+            )
+        return fake_run(argv, env=env)
+
+    fake_run, deps = deps.run, dataclasses.replace(deps, run=run)
+    path = score_file(score)
+    assert main(["render", str(path), "--voice", "both", "--no-pdf"], deps=deps) == 0
+    assert played == [[57, 59], [48, 50]]  # the clarinet at sounding pitch; part 2 unchanged
+    toml = (path.parent / f"{path.stem}.synth.toml").read_text()
+    first_track = toml.split("[[track]]")[1]
+    assert set(re.findall(r"pitch = ([\d.]+)", first_track)) == {"220.000", "246.942"}

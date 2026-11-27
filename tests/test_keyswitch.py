@@ -253,6 +253,26 @@ def test_cli_colliding_key_exits_1_and_writes_nothing(score_file, tmp_path, sfz,
     assert not (out / "fixture.piano.wav").exists()
 
 
+def test_cli_switch_keys_are_checked_against_sounding_pitch(score_file, tmp_path, sfz, capsys):
+    from music21 import instrument, interval
+
+    score = build_score()
+    clarinet = instrument.Clarinet()
+    clarinet.instrumentName = "Clarinet in A"
+    clarinet.transposition = interval.Interval("m-3")
+    score.parts[1].insert(0, clarinet)  # P2 written C3-D3, sounding A2-B2
+    deps, midis = fake_engines(tmp_path)
+    # key 46 is below the written range but inside the sounding one, which
+    # is what the SFZ receives: it would sound as a pitch
+    side = write_sidecar(tmp_path, {"P2": {"curves": [ks([[0, 46]])]}})
+    argv = ["render", str(score_file(score)), *SFIZZ, "--sfz", sfz, "--expression", str(side)]
+    assert main(argv, deps=deps) == 1
+    assert "key 46 (a#2) is inside the part's played range, 45 (a2) to 47 (b2)" in (
+        capsys.readouterr().err
+    )
+    assert midis == []
+
+
 def test_cli_output_line_counts_the_switch_notes(score_file, tmp_path, sfz, capsys):
     deps, _ = fake_engines(tmp_path)
     side = write_sidecar(
