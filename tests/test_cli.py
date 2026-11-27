@@ -71,6 +71,9 @@ def test_ingest_pdf_runs_audiveris(tmp_path, capsys):
     assert main(["ingest", str(pdf)], deps=deps) == 0
     flatpak_call = calls[0]
     assert f"--filesystem={tmp_path}" in flatpak_call
+    # the -output dir Audiveris writes to must be granted to the sandbox too
+    outdir = flatpak_call[flatpak_call.index("-output") + 1]
+    assert f"--filesystem={outdir}" in flatpak_call
     assert (tmp_path / "scan.musicxml").exists()
     err = capsys.readouterr().err
     assert "proofing pass" in err  # OMR reminder
