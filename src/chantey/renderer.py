@@ -62,6 +62,10 @@ def render(
         if warning:
             result.warnings.append(warning)
         expanded = _without_chord_symbols(expanded, score)
+        # music21's MIDI writer converts only a stream flagged as written
+        # pitch, and a loaded Score is flagged 'unknown' even when its parts
+        # transpose; convert once (a copy), so every voice plays as heard
+        expanded = expanded.toSoundingPitch()
     # checked against the score before anything is written, whatever the voice
     plan = expression.resolve(sidecar, expanded) if sidecar is not None else None
     if plan is not None and voice in ("piano", "both") and engine != "sfizz":

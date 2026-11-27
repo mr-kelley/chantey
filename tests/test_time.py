@@ -344,7 +344,8 @@ def test_cli_fluidsynth_output_line_counts_shifted(tmp_path, capsys):
     sent = tmp_path / "sent.mid"
     sent.write_bytes(data)
     tpq = _read_midi(sent).ticksPerQuarterNote
-    assert _notes(_read_midi(sent).tracks[1])[0] == (_ms_ticks(30, tpq, 100), "on", 60)
+    # the B-flat trumpet's written C4 sounds B-flat 3 (MIDI 58)
+    assert _notes(_read_midi(sent).tracks[1])[0] == (_ms_ticks(30, tpq, 100), "on", 58)
 
 
 @pytest.mark.parametrize(
