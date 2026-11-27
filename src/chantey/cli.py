@@ -203,6 +203,9 @@ def _cmd_diff(args, deps: Deps) -> int:
     if report.identical:
         print("identical scores — no differing measures")
         return 0
+    if not report.changed:  # part counts differ; the shared parts match
+        print("no differing measures in the parts both scores share")
+        return 0
     print("changed measures: " + ", ".join(str(n) for n in report.changed))
     if args.verbose:
         for label, measures in report.per_part.items():
