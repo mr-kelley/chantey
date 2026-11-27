@@ -195,6 +195,20 @@ def test_diff_identical(tmp_path, capsys):
     assert "identical scores" in capsys.readouterr().out
 
 
+def test_diff_part_count_mismatch_says_no_differing_measures(tmp_path, capsys):
+    a = build_score()
+    b = copy.deepcopy(a)
+    b.remove(b.parts[1])  # the remaining part is identical
+    pa, pb = tmp_path / "a.musicxml", tmp_path / "b.musicxml"
+    write_musicxml(a, pa)
+    write_musicxml(b, pb)
+    assert main(["diff", str(pa), str(pb)]) == 0
+    captured = capsys.readouterr()
+    assert "part counts differ between the two scores" in captured.err
+    assert "no differing measures in the parts both scores share" in captured.out
+    assert "changed measures:" not in captured.out
+
+
 def test_compare_identical_writes_nothing(tmp_path, capsys):
     a = build_score()
     pa, pb = tmp_path / "a.musicxml", tmp_path / "b.musicxml"
