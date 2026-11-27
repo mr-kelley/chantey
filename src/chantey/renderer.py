@@ -13,6 +13,7 @@ sidecar's curves are merged when one is given (`expression`).
 
 from __future__ import annotations
 
+import copy
 import signal
 import tempfile
 import threading
@@ -20,7 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from music21 import midi, stream
+from music21 import harmony, midi, stream
 
 from . import deps as depsmod
 from . import expression, sfzengine
@@ -60,6 +61,7 @@ def render(
         expanded, warning = expand_repeats(score)
         if warning:
             result.warnings.append(warning)
+        expanded = _without_chord_symbols(expanded, score)
     # checked against the score before anything is written, whatever the voice
     plan = expression.resolve(sidecar, expanded) if sidecar is not None else None
     if plan is not None and voice in ("piano", "both") and engine != "sfizz":
@@ -115,6 +117,19 @@ def _check_produced(path: Path, what: str) -> Path:
     if not path.exists():
         raise ToolRunError(f"{what} reported success but produced no {path.name}")
     return path
+
+
+def _without_chord_symbols(expanded: stream.Score, score: stream.Score) -> stream.Score:
+    """Chord symbols are instructions to a player, not notes, but music21's
+    MIDI writer sounds each one as a block chord. Drop them from the audio
+    score, copying first if repeat expansion fell back to the caller's score."""
+    if not any(expanded.recurse().getElementsByClass(harmony.ChordSymbol)):
+        return expanded
+    if expanded is score:
+        expanded = copy.deepcopy(score)
+    for symbol in list(expanded.recurse().getElementsByClass(harmony.ChordSymbol)):
+        symbol.activeSite.remove(symbol)
+    return expanded
 
 
 def _render_piano(
