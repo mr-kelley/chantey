@@ -81,7 +81,7 @@ def score_info(score: stream.Score) -> Info:
         if entry not in tempos:
             tempos.append(entry)
     info = Info(
-        title=md.title if md else None,
+        title=md.bestTitle if md else None,
         composer=(md.composer or None) if md else None,
         parts=parts,
         tail_quarters=tail_quarters(expanded),
@@ -138,7 +138,9 @@ def ensure_title(score: stream.Score, fallback: str) -> None:
 
     if score.metadata is None:
         score.insert(0, m21metadata.Metadata())
-    if not score.metadata.title:
+    # bestTitle falls back to <movement-title>, where many engravings keep the
+    # name; music21's reader clears a work title equal to it on every load.
+    if not score.metadata.bestTitle:
         score.metadata.title = fallback
 
 
